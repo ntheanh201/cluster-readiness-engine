@@ -176,11 +176,19 @@ func TestManifestCoversRepoImageReferences(t *testing.T) {
 	m, err := BuildImageManifest(ImageManifestOptions{Version: "v1.0.0-test"})
 	require.NoError(t, err)
 
-	manifestRepos := make(map[string]string, len(m.Images)) // repository -> full manifest ref
+	// Two indexes on purpose. A scanned reference that names a tag or digest
+	// must be mirrored at that exact reference: matching on the repository
+	// alone would let a new tag of an already-listed repository pass while the
+	// mirror lacks it, which is precisely how nemotron5-56b's images went
+	// missing without this test noticing. Tagless references (the chart values
+	// form) can only be checked by repository.
+	manifestRefs := make(map[string]bool, len(m.Images))
+	manifestRepos := make(map[string]bool, len(m.Images))
 	for _, r := range m.Images {
+		manifestRefs[r.Image] = true
 		repo, ok := splitRepository(r.Image)
 		require.True(t, ok, "manifest image %q is not registry-qualified", r.Image)
-		manifestRepos[repo] = r.Image
+		manifestRepos[repo] = true
 	}
 
 	// The embedded Dockerfile snapshot must match the real repo Dockerfile,
@@ -195,9 +203,24 @@ func TestManifestCoversRepoImageReferences(t *testing.T) {
 	for image, where := range repoImageReferences(t) {
 		repo, ok := splitRepository(image)
 		require.True(t, ok, "scanned image %q (from %s) is not registry-qualified", image, where)
+		if pinnedReference(image) {
+			assert.Contains(t, manifestRefs, image,
+				"%s references image %q but the air-gap manifest does not list that exact reference; extend the derivation in images_manifest.go so a new image or tag cannot ship unmirrored", where, image)
+			continue
+		}
 		assert.Contains(t, manifestRepos, repo,
-			"%s references image %q but the air-gap manifest does not list it; extend the derivation in images_manifest.go so a new image cannot ship unmirrored", where, image)
+			"%s references repository %q but the air-gap manifest does not list it; extend the derivation in images_manifest.go so a new image cannot ship unmirrored", where, image)
 	}
+}
+
+// pinnedReference reports whether ref names a specific tag or digest, as
+// opposed to the bare repository a chart values file carries.
+func pinnedReference(ref string) bool {
+	if strings.Contains(ref, "@") {
+		return true
+	}
+	slash := strings.LastIndex(ref, "/")
+	return strings.Contains(ref[slash+1:], ":")
 }
 
 // fromLines extracts the FROM image references from a Dockerfile body.

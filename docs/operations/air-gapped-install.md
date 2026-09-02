@@ -1,13 +1,14 @@
 ---
 title: Air-Gapped Install
-description: Install, run, and remove NVCRE in an environment with no internet access — mirror the images and charts, then point setup init at the mirror.
+description: Mirror every image and chart NVCRE needs into a private registry, and what does and does not yet work when installing from it with egress denied.
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 ---
 
 NVCRE runs in clusters that are disconnected from the internet by policy. The
 install is Helm-based, so the images are mirrorable; this page walks through
-the full path: mirror, install, certify, tear down.
+the path: mirror, install, certify, tear down. Read the Install section first —
+one step of it does not work yet.
 
 ## Generate the mirror manifest
 
@@ -66,19 +67,22 @@ images by name and tag.
 
 ## Install
 
-`nvcrectl setup init` accepts overrides for both charts and the controller
-image. Point them at the mirror:
+<Warning>
+`nvcrectl setup init` cannot yet install from a mirrored chart. It overrides
+the controller **image** with `--image`, but both Helm chart locations are
+compile-time constants pointing at `ghcr.io`
+([`helmChartOCI` and `trainerHelmChartOCI`](../../pkg/setup/helm.go)), and
+`--image-pull-secret` authenticates against `ghcr.io` specifically. With egress
+denied, `setup init` therefore fails when it pulls its own chart. Installing
+NVCRE itself from a mirror needs chart-location overrides that do not exist
+today; until they land, only the Kubeflow Trainer half of the install can be
+served from a mirror, using the `--skip-phases=deps` route below. Mirroring the
+NVCRE chart is still worth doing — the manifest lists it — so the mirror is
+complete when those overrides arrive.
+</Warning>
 
-```bash
-helm registry login <mirror>
-nvcrectl setup init \
-  --image <mirror>/cluster-readiness-engine/manager:<version>
-```
-
-For the Kubeflow Trainer chart, set the same overrides `setup init` passes
-when it installs the `[deps]` phase — mirror the chart into an OCI registry
-that your Helm client resolves, or install the pinned Trainer chart from the
-mirror first and pass `--skip-phases=deps`:
+Install the pinned Trainer chart from the mirror first, then run `setup init`
+with the `[deps]` phase skipped and the controller image pointed at the mirror:
 
 ```bash
 helm upgrade --install kubeflow-trainer \
@@ -122,11 +126,14 @@ environment where egress is provably denied:
    connection from a cluster node times out afterwards.
 2. **Preload the mirror** with everything the manifest lists — not a subset.
    The manifest is the source of truth; "it worked last time" hides misses.
-3. **Install** with the mirror overrides from the previous section. Run
+3. **Install** by the `--skip-phases=deps` route in the previous section. Note
+   that this step is where the missing chart-location override bites: confirm
+   what actually happens rather than assuming it succeeds. Run
    `nvcrectl setup status` and confirm every component is ready.
 4. **Certify** a small target (a `Certification` with a single
-   `communication/nccl-loopback` category on one GPU node is enough — it pulls
-   `nvcr.io/nvidia/pytorch:26.01-py3` and nothing else). Confirm the workload
+   `communication/nccl-loopback` category on one GPU node is enough; which
+   image it pulls depends on the detected platform, so check the manifest's
+   `source:` entries for that category rather than assuming a single image). Confirm the workload
    pods reach `Running` and the Certification reaches a terminal condition.
 5. **Tear down** with `nvcrectl setup reset` and confirm the release, the
    CRDs, and the Trainer install are removed.

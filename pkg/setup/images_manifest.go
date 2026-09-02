@@ -251,12 +251,27 @@ func workloadImagesFromSpec(spec *nvcrev1alpha1.WorkflowSpec, source string) ([]
 		out = append(out, ImageRef{Image: image, Source: source, Kind: "workload"})
 	}
 
-	if tj := spec.JobTemplate.Spec.Workload.TrainJob; tj != nil && tj.Trainer != nil && tj.Trainer.Image != nil {
-		add(*tj.Trainer.Image)
-	}
-	for _, patch := range spec.JobTemplate.Spec.Workload.TrainJob.RuntimePatches {
-		if patch.TrainingRuntimeSpec != nil {
-			walkImages(patch.TrainingRuntimeSpec, add)
+	if tj := spec.JobTemplate.Spec.Workload.TrainJob; tj != nil {
+		if tj.Trainer != nil && tj.Trainer.Image != nil {
+			add(*tj.Trainer.Image)
+		}
+		for _, patch := range tj.RuntimePatches {
+			if patch.TrainingRuntimeSpec == nil {
+				continue
+			}
+			// TrainingRuntimeSpec is a typed struct, and walkImages only
+			// understands the generic decoded form, so round-trip it. Walking
+			// the typed value directly matched no case and silently collected
+			// nothing.
+			raw, err := yaml.Marshal(patch.TrainingRuntimeSpec)
+			if err != nil {
+				return nil, fmt.Errorf("encode runtime patch of %s: %w", source, err)
+			}
+			var obj any
+			if err := yaml.Unmarshal(raw, &obj); err != nil {
+				return nil, fmt.Errorf("decode runtime patch of %s: %w", source, err)
+			}
+			walkImages(obj, add)
 		}
 	}
 	for _, dep := range spec.Dependencies {

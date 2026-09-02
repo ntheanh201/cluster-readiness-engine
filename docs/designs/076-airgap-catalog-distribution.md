@@ -92,4 +92,4 @@ Whichever option is chosen, the ADR that lands it should specify at minimum:
 - ADR-010 — Certification catalog with `init()` registration (the embedded-catalog mechanics).
 - ADR-064 / ADR-065 — Helm chart distribution and `nvcrectl` Helm install (the mirror precedent this note builds on).
 - ADR-021 — Performance threshold enforcement (the thresholds any distributed catalog must carry).
-- `docs/operations/air-gapped-install.md` — the validated install/teardown procedure and the `nvcrectl setup images` manifest.
+- `docs/operations/air-gapped-install.md` — the proposed install/teardown procedure (documented, not yet executed against a real egress-denied cluster) and the `nvcrectl setup images` manifest.
