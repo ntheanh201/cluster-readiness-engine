@@ -1,24 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// Air-gap image manifest (issue #243). Derives every container image an
-// air-gapped NVCRE install must mirror, from the same sources the running
-// system uses:
-//
-//   - the controller image, from this package's default registry and
-//     repository (what `nvcrectl setup init` installs),
-//   - the Kubeflow Trainer stack, from the pinned trainer chart version and
-//     the images the chart renders with `setup init`'s exact values,
-//   - every catalog workload image, by building each registered catalog entry
-//     across a platform × GPU-architecture matrix and resolving platform and
-//     architecture overrides exactly like `nvcrectl certification render`,
-//   - the Helm chart OCI references (install-time, not container images, but
-//     equally mirror-required), and
-//   - the NVCRE controller build base images from the repo Dockerfile
-//     (embedded at compile time).
-//
-// The single entry point is BuildManifest, so `nvcrectl setup images` and the
-// repo's completeness test cannot diverge.
+// Air-gap image manifest (issue #243). Derives every container image and chart
+// an air-gapped install must mirror from the same sources the running system
+// uses, rather than a hand-kept list that rots. The single entry point is
+// BuildImageManifest, so `nvcrectl setup images` and the repo's completeness
+// test cannot diverge.
 package setup
 
 import (
@@ -51,14 +38,14 @@ type ImageRef struct {
 	Kind string `json:"kind"`
 }
 
-// ChartRef is one Helm chart OCI reference an operator must mirror.
+// ChartRef is one Helm chart OCI reference an operator must mirror. Charts are
+// install-time artifacts rather than container images, but an air-gapped
+// install needs them mirrored just the same.
 type ChartRef struct {
 	// Chart is the OCI reference, e.g. oci://ghcr.io/nvidia/cluster-readiness-engine.
-	Chart string `json:"chart"`
-	// Version is the version tag to mirror.
+	Chart   string `json:"chart"`
 	Version string `json:"version"`
-	// Source names where the reference comes from.
-	Source string `json:"source"`
+	Source  string `json:"source"`
 }
 
 // ImageManifest is the complete set of artifacts an air-gapped environment
