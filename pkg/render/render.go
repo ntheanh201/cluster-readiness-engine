@@ -550,3 +550,29 @@ func listAvailable() []string {
 	}
 	return available
 }
+
+// NodeTemplatePair names one embedded node template under nodes/.
+type NodeTemplatePair struct {
+	Platform string
+	GPUArch  string
+}
+
+// AvailableNodeTemplates lists every embedded <platform>-<arch> node
+// template. The air-gap image manifest sweeps this matrix so catalog
+// overrides resolve exactly the way the controller resolves them.
+func AvailableNodeTemplates() ([]NodeTemplatePair, error) {
+	entries, err := embeddedNodes.ReadDir("nodes")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]NodeTemplatePair, 0, len(entries))
+	for _, e := range entries {
+		name := strings.TrimSuffix(e.Name(), ".yaml")
+		platform, arch, found := strings.Cut(name, "-")
+		if !found {
+			continue
+		}
+		out = append(out, NodeTemplatePair{Platform: platform, GPUArch: arch})
+	}
+	return out, nil
+}

@@ -67,6 +67,7 @@ func NewCommand(version string) *cobra.Command {
 	cmd.AddCommand(newInitCommand(version))
 	cmd.AddCommand(newResetCommand())
 	cmd.AddCommand(newSetupStatusCommand())
+	cmd.AddCommand(newImagesCommand(version))
 	return cmd
 }
 

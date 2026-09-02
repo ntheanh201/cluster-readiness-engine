@@ -300,6 +300,11 @@ helm-push: check-clean-version helm-package ## Push the Helm chart to the OCI re
 		cluster-readiness-engine-$(HELM_PACKAGE_VERSION).tgz \
 		$(HELM_OCI_REGISTRY)
 
+.PHONY: airgap-images
+airgap-images: ## Print every container image and OCI chart an air-gapped install must mirror.
+	go build -ldflags "$(LDFLAGS)" -o "$(LOCALBIN)/nvcrectl" ./cmd/nvcrectl/
+	"$(LOCALBIN)/nvcrectl" setup images
+
 ##@ Dependencies
 
 ## Location to install dependencies to
