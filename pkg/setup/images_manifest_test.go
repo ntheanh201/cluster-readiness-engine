@@ -16,6 +16,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/yaml"
 
+	nvcrev1alpha1 "github.com/NVIDIA/cluster-readiness-engine/api/v1alpha1"
+	"github.com/NVIDIA/cluster-readiness-engine/pkg/catalog"
 	"github.com/NVIDIA/cluster-readiness-engine/pkg/testutil"
 )
 
@@ -213,17 +215,64 @@ func fromLines(data []byte) []string {
 // Trainer chart images: pinned against the real chart.
 // ---------------------------------------------------------------------------
 
+// TestUnknownTrainerVersionFails pins the behaviour that matters more than the
+// golden: a trainer version with no recorded render must be an error, not a
+// guess. Sub-chart tags move independently of the chart version — jobset went
+// v0.11.0 -> v0.12.0 between trainer 2.2.1 and 2.3.0 — so emitting the tags of
+// the last known version would send an operator to mirror the wrong images and
+// find out only after egress is cut.
+func TestUnknownTrainerVersionFails(t *testing.T) {
+	_, err := trainerChartImages("v99.99.99")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no recorded sub-chart images")
+	require.Contains(t, err.Error(), "helm template", "the error must say how to fix it")
+
+	_, err = BuildImageManifest(ImageManifestOptions{TrainerVersion: "99.99.99"})
+	require.Error(t, err, "an unknown trainer version must fail the whole manifest")
+}
+
+// TestEveryCatalogEntryContributesImages guards the failure the sweep used to
+// hide. Building each entry at a single fixed node count silently produced
+// nothing for training/nemotron5-56b, whose parallelism needs 32 GPUs: it was
+// skipped for all 13 platform/architecture combinations, and the omission was
+// invisible only because it happens to share an image with nemotron5-8b. Bump
+// that entry's image and the air-gap mirror loses it without a word.
+func TestEveryCatalogEntryContributesImages(t *testing.T) {
+	pairs, err := imageMatrix()
+	require.NoError(t, err)
+
+	for _, cat := range catalog.List() {
+		entry := catalog.Lookup(cat.Domain, cat.Variant)
+		if entry == nil {
+			continue
+		}
+		built := 0
+		for _, pa := range pairs {
+			if _, err := buildForImages(entry, nvcrev1alpha1.TargetSpec{}, pa); err == nil {
+				built++
+			}
+		}
+		require.NotZero(t, built,
+			"catalog entry %s/%s built for none of the %d platform/architecture combinations, "+
+				"so it contributes no images to the air-gap manifest",
+			cat.Domain, cat.Variant, len(pairs))
+	}
+}
+
 // TestTrainerChartImagesGolden pins the Kubeflow Trainer image list against
 // the images the real chart at the pinned version renders with setup init's
-// exact helm args (verified against the published chart). When the pin in
-// setup.go moves, re-render the chart and update this golden:
+// exact helm args. When the pin in setup.go moves, this test fails: do NOT
+// regenerate the golden. Render the chart at the new version and add its
+// sub-chart images to trainerSubchartImages first — regenerating alone would
+// keep the previous sub-chart tags, which is the bug the table exists to stop.
 //
 //	helm template kubeflow-trainer oci://ghcr.io/kubeflow/charts/kubeflow-trainer \
 //	  --version <v> --set manager.tolerations[0].operator=Exists \
 //	  --set jobset.controller.tolerations[0].operator=Exists \
 //	  | grep -E '^\s*image:' | sort -u
 func TestTrainerChartImagesGolden(t *testing.T) {
-	got := trainerChartImages(TrainerChartVersion())
+	got, err := trainerChartImages(TrainerChartVersion())
+	require.NoError(t, err)
 	slices.Sort(got)
 
 	data, err := yaml.Marshal(map[string]any{"images": got})

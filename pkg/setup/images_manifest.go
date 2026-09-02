@@ -110,12 +110,17 @@ func imageMatrix() ([]platformArch, error) {
 	return out, nil
 }
 
-// imageBuildConfig returns the catalog BuildConfig used for the sweep. Node
-// and GPU counts are irrelevant to image selection, so the smallest legal
-// values are used: 1 node, and the architecture's gpusPerNode default.
-// Checkpoint, thresholds, and iterations likewise do not appear in any image
-// field.
-func imageBuildConfig(pa platformArch) catalog.BuildConfig {
+// imageNodeCounts are the per-job node counts the sweep tries, smallest first.
+// Node count does not appear in any image field, but it does gate whether an
+// entry builds at all: training entries reject a job too small to hold their
+// parallelism (nemotron5-56b needs 32 GPUs, so 4 nodes of 8). Trying only 1
+// node made that entry build for zero combinations and contribute zero images.
+var imageNodeCounts = []int32{1, 2, 4, 8, 16}
+
+// imageBuildConfig returns the catalog BuildConfig used for the sweep. GPU
+// count comes from the architecture default; checkpoint, thresholds, and
+// iterations do not appear in any image field.
+func imageBuildConfig(pa platformArch, nodesPerJob int32) catalog.BuildConfig {
 	defaults := catalog.GPUDefaults(pa.GPUArch, pa.Platform)
 	gpusPerNode := defaults.GpusPerNode
 	if gpusPerNode <= 0 {
@@ -123,31 +128,73 @@ func imageBuildConfig(pa platformArch) catalog.BuildConfig {
 	}
 	return catalog.BuildConfig{
 		GPUArchitecture: pa.GPUArch,
-		NodesPerJob:     1,
+		NodesPerJob:     nodesPerJob,
 		GpusPerNode:     gpusPerNode,
 		MlnxPerNode:     defaults.MlnxPerNode,
 	}
 }
 
-// trainerChartImages returns the container images the Kubeflow Trainer chart
-// renders with `setup init`'s exact helm args at the given chart version:
+// buildForImages builds entry at the smallest node count it accepts. The
+// returned error is the last failure when no count works.
+func buildForImages(entry *catalog.Entry, target nvcrev1alpha1.TargetSpec, pa platformArch) (nvcrev1alpha1.WorkflowSpec, error) {
+	var lastErr error
+	for _, n := range imageNodeCounts {
+		spec, err := entry.Build(target, imageBuildConfig(pa, n))
+		if err == nil {
+			return spec, nil
+		}
+		lastErr = err
+	}
+	return nvcrev1alpha1.WorkflowSpec{}, lastErr
+}
+
+// trainerSubchartImages records the images the Kubeflow Trainer chart's
+// sub-charts render, keyed by the trainer chart version. Only the trainer
+// manager's own tag can be derived from the version; sub-charts pin their own
+// tags in their values, and those move independently — jobset went v0.11.0 ->
+// v0.12.0 between trainer 2.2.1 and 2.3.0.
+//
+// This table is transcribed from a real render, which is the only source of
+// truth:
 //
 //	helm template kubeflow-trainer oci://ghcr.io/kubeflow/charts/kubeflow-trainer \
 //	  --version <v> --set manager.tolerations[0].operator=Exists \
 //	  --set jobset.controller.tolerations[0].operator=Exists
 //
-// The trainer manager image tag equals the pinned kubeflowTrainerVersion
-// (v-prefixed); the JobSet sub-chart pins its own tag in its values. The
-// LWS sub-chart image only renders when data cache is enabled, which setup
-// init does not enable. The pkg/setup/testdata/trainer-chart-images golden
-// pins this list against the real chart so a trainer bump fails the test
-// until the list is re-derived.
-func trainerChartImages(chartVersion string) []string {
-	_ = chartVersion
-	return []string{
-		fmt.Sprintf("%s/kubeflow/trainer/trainer-controller-manager:%s", defaultImageRegistry, kubeflowTrainerVersion),
-		"registry.k8s.io/jobset/jobset:v0.11.0",
+// The LWS sub-chart image renders only when data cache is enabled, which
+// `setup init` does not enable, so it is deliberately absent.
+//
+// An unknown version is an error rather than a guess: emitting a stale
+// sub-chart tag would put an operator through mirror -> cut egress ->
+// ImagePullBackOff, which is exactly the failure this manifest exists to
+// prevent.
+var trainerSubchartImages = map[string][]string{
+	"v2.2.1": {"registry.k8s.io/jobset/jobset:v0.11.0"},
+}
+
+// trainerChartImages returns the images the Kubeflow Trainer chart renders at
+// chartVersion with `setup init`'s helm args. The manager tag follows the
+// version; sub-chart tags come from trainerSubchartImages.
+func trainerChartImages(chartVersion string) ([]string, error) {
+	if chartVersion == "" {
+		chartVersion = kubeflowTrainerVersion
 	}
+	if !strings.HasPrefix(chartVersion, "v") {
+		chartVersion = "v" + chartVersion
+	}
+	sub, ok := trainerSubchartImages[chartVersion]
+	if !ok {
+		return nil, fmt.Errorf(
+			"no recorded sub-chart images for Kubeflow Trainer %s: render the chart and add its "+
+				"sub-chart images to trainerSubchartImages in pkg/setup/images_manifest.go "+
+				"(helm template kubeflow-trainer oci://ghcr.io/kubeflow/charts/kubeflow-trainer "+
+				"--version %s --set manager.tolerations[0].operator=Exists "+
+				"--set jobset.controller.tolerations[0].operator=Exists | grep image:)",
+			chartVersion, strings.TrimPrefix(chartVersion, "v"))
+	}
+	out := make([]string, 0, 1+len(sub))
+	out = append(out, fmt.Sprintf("%s/kubeflow/trainer/trainer-controller-manager:%s", defaultImageRegistry, chartVersion))
+	return append(out, sub...), nil
 }
 
 // TrainerChartVersion returns the Kubeflow Trainer chart version the `[deps]`
@@ -255,14 +302,20 @@ func catalogImages() ([]ImageRef, error) {
 		if entry == nil {
 			continue
 		}
+		built := 0
+		var lastBuildErr error
 		for _, pa := range pairs {
-			spec, err := entry.Build(target, imageBuildConfig(pa))
+			spec, err := buildForImages(entry, target, pa)
 			if err != nil {
 				// Some (platform, architecture) combinations are invalid for
 				// an entry (minGPUs, TP×PP divisibility). Those combinations
 				// can never run, so their images are irrelevant; skip them.
+				// An entry that builds for NO combination is a different
+				// thing and is caught after the loop.
+				lastBuildErr = err
 				continue
 			}
+			built++
 			// Resolve overrides exactly like `nvcrectl certification render`:
 			// detect platform/GPU arch from the embedded node template, apply,
 			// then read the images out of the resolved spec.
@@ -281,6 +334,17 @@ func catalogImages() ([]ImageRef, error) {
 			}
 			add(refs)
 		}
+		// An entry that built for no combination contributed no images, so
+		// whatever it pulls is missing from the manifest. Today that is
+		// invisible only because the entry happens to share an image with a
+		// sibling; the moment it is bumped, the mirror silently loses it and
+		// the failure surfaces after egress is cut. Fail here instead.
+		if built == 0 {
+			return nil, fmt.Errorf(
+				"catalog entry %s/%s built for none of the %d platform/architecture combinations, "+
+					"so it contributed no images: %w",
+				cat.Domain, cat.Variant, len(pairs), lastBuildErr)
+		}
 	}
 
 	sort.Slice(out, func(i, j int) bool { return out[i].Image < out[j].Image })
@@ -297,22 +361,22 @@ func controllerImageRef(version string) ImageRef {
 	}
 }
 
-// trainerImageRefs returns the images the pinned Kubeflow Trainer chart
-// renders with the exact values `nvcrectl setup init` passes. The list is
-// cross-checked against the real chart by the
-// pkg/setup/testdata/trainer-chart-images golden, so a trainer bump is caught
-// by the completeness test rather than rotting here.
-func trainerImageRefs(chartVersion string) []ImageRef {
-	refs := trainerChartImages(chartVersion)
+// trainerImageRefs returns the images the Kubeflow Trainer chart at
+// chartVersion renders with the values `nvcrectl setup init` passes.
+func trainerImageRefs(chartVersion string) ([]ImageRef, error) {
+	refs, err := trainerChartImages(chartVersion)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]ImageRef, 0, len(refs))
 	for _, r := range refs {
 		out = append(out, ImageRef{
 			Image:  r,
-			Source: "kubeflow-trainer chart " + chartVersion + " rendered with setup init values",
+			Source: "kubeflow-trainer chart " + strings.TrimPrefix(chartVersion, "v") + " (recorded render)",
 			Kind:   "trainer",
 		})
 	}
-	return out
+	return out, nil
 }
 
 // chartRefs returns the OCI chart references an install pulls.
@@ -389,10 +453,14 @@ func BuildImageManifest(opts ImageManifestOptions) (*ImageManifest, error) {
 	if err != nil {
 		return nil, fmt.Errorf("derive build images: %w", err)
 	}
+	trainerRefs, err := trainerImageRefs(trainerVersion)
+	if err != nil {
+		return nil, fmt.Errorf("derive trainer images: %w", err)
+	}
 
-	images := make([]ImageRef, 0, 1+len(trainerImageRefs(trainerVersion))+len(catalogRefs)+len(buildRefs))
+	images := make([]ImageRef, 0, 1+len(trainerRefs)+len(catalogRefs)+len(buildRefs))
 	images = append(images, controllerImageRef(version))
-	images = append(images, trainerImageRefs(trainerVersion)...)
+	images = append(images, trainerRefs...)
 	images = append(images, catalogRefs...)
 	images = append(images, buildRefs...)
 

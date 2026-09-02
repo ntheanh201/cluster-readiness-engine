@@ -12,16 +12,16 @@ images:
     --image default
 - image: ghcr.io/kubeflow/trainer/trainer-controller-manager:v2.2.1
   kind: trainer
-  source: kubeflow-trainer chart 2.2.1 rendered with setup init values
+  source: kubeflow-trainer chart 2.2.1 (recorded render)
 - image: registry.k8s.io/jobset/jobset:v0.11.0
   kind: trainer
-  source: kubeflow-trainer chart 2.2.1 rendered with setup init values
+  source: kubeflow-trainer chart 2.2.1 (recorded render)
 - image: nvcr.io/nvidia/cloud-native/dcgm:4.5.2-1-ubuntu22.04
   kind: workload
   source: catalog/diagnostics/dcgm-level4
 - image: nvcr.io/nvidia/pytorch:25.08-py3
   kind: workload
-  source: catalog/training/nemotron5-8b
+  source: catalog/training/nemotron5-56b
 - image: nvcr.io/nvidia/pytorch:26.01-py3
   kind: workload
   source: catalog/communication/nccl-all-gather

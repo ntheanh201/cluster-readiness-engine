@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
@@ -567,6 +568,12 @@ func AvailableNodeTemplates() ([]NodeTemplatePair, error) {
 	}
 	out := make([]NodeTemplatePair, 0, len(entries))
 	for _, e := range entries {
+		// Only .yaml files name a template. Without this check a stray
+		// README-nodes.md or an editor's .yaml.bak parses into a bogus
+		// (platform, arch) pair that LoadEmbeddedNodes then fails to load.
+		if e.IsDir() || filepath.Ext(e.Name()) != ".yaml" {
+			continue
+		}
 		name := strings.TrimSuffix(e.Name(), ".yaml")
 		platform, arch, found := strings.Cut(name, "-")
 		if !found {
