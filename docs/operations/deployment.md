@@ -12,6 +12,8 @@ This page covers deploying the NVIDIA Cluster Readiness Engine (NVCRE) controlle
 
 NVCRE supports two install paths. Both pull the same artifacts from the GitHub Container Registry (GHCR).
 
+For clusters with no internet access, see [Air-Gapped Install](air-gapped-install.md) for the mirror manifest and the offline install procedure.
+
 | Method | Audience | Installs Kubeflow Trainer |
 |--------|----------|---------------------------|
 | `nvcrectl setup init` | Operators, quick setup | Yes (skip with `--skip-phases=deps`) |

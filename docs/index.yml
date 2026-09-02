@@ -92,6 +92,8 @@ navigation:
     contents:
       - page: Deployment
         path: operations/deployment.md
+      - page: Air-Gapped Install
+        path: operations/air-gapped-install.md
       - page: Monitoring
         path: operations/monitoring.md
       - page: Prometheus Metrics
