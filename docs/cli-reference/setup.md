@@ -141,3 +141,29 @@ nvcrectl setup reset --skip-phases=deps
 <Warning>
 `reset` deletes all Certification, Workflow, and Job resources. This is irreversible.
 </Warning>
+
+## `nvcrectl setup images`
+
+Prints every container image and Helm chart an air-gapped install must mirror. Offline: it reads the embedded catalog, the chart values, and the controller Dockerfile, and contacts nothing.
+
+The list is derived, not hand-maintained — catalog entries are built across every platform and GPU-architecture combination and their overrides resolved the way `certification render` resolves them, so an image used only by one platform's override block is still found.
+
+### Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--output` | `table` | Output format: `table`, `yaml`, or `json` |
+| `--image-version` | CLI version | NVCRE version for the controller image tag and chart version (`<version>` placeholder on dev builds) |
+| `--trainer-version` | the pinned version | Kubeflow Trainer chart version. Fails if that version's rendered sub-chart images are not recorded in the repo — see the note below |
+
+### Example
+
+```bash
+nvcrectl setup images --output yaml > nvcre-images.yaml
+```
+
+<Note>
+Only the Trainer manager's tag follows the chart version; sub-charts such as JobSet pin their own tags and move independently (JobSet went `v0.11.0` to `v0.12.0` between Trainer 2.2.1 and 2.3.0). Passing a `--trainer-version` whose render has not been recorded in the repo is an error naming the `helm template` command that records it, rather than a manifest built from the previous version's tags — mirroring those would fail only after egress was cut.
+</Note>
+
+See [Air-Gapped Install](../operations/air-gapped-install.md) for the full mirror-and-install path, including a step that does not work yet.

@@ -325,6 +325,11 @@ helm-push: check-clean-version helm-package ## Push the Helm chart to the OCI re
 	echo "chart digest: $$digest"; \
 	if [ -n "$(CHART_DIGEST_FILE)" ]; then printf '%s' "$$digest" > "$(CHART_DIGEST_FILE)"; fi
 
+.PHONY: airgap-images
+airgap-images: ## Print every container image and OCI chart an air-gapped install must mirror.
+	go build -ldflags "$(LDFLAGS)" -o "$(LOCALBIN)/nvcrectl" ./cmd/nvcrectl/
+	"$(LOCALBIN)/nvcrectl" setup images
+
 ##@ Dependencies
 
 ## Location to install dependencies to
