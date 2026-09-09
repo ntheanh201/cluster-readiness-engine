@@ -1,0 +1,42 @@
+charts:
+- chart: oci://ghcr.io/nvidia/cluster-readiness-engine
+  source: nvcrectl setup init [helm] phase / helm install
+  version: v1.0.0-test
+- chart: oci://ghcr.io/kubeflow/charts/kubeflow-trainer
+  source: nvcrectl setup init [deps] phase
+  version: 2.2.1
+images:
+- image: ghcr.io/nvidia/cluster-readiness-engine/manager:v1.0.0-test
+  kind: controller
+  source: helm/cluster-readiness-engine values manager.image + nvcrectl setup init
+    --image default
+- image: ghcr.io/kubeflow/trainer/trainer-controller-manager:v2.2.1
+  kind: trainer
+  source: kubeflow-trainer chart 2.2.1 (recorded render)
+- image: registry.k8s.io/jobset/jobset:v0.11.0
+  kind: trainer
+  source: kubeflow-trainer chart 2.2.1 (recorded render)
+- image: nvcr.io/nvidia/cloud-native/dcgm:4.5.2-1-ubuntu22.04
+  kind: workload
+  source: catalog/diagnostics/dcgm-level4
+- image: nvcr.io/nvidia/pytorch:25.08-py3
+  kind: workload
+  source: catalog/training/nemotron5-56b
+- image: nvcr.io/nvidia/pytorch:26.01-py3
+  kind: workload
+  source: catalog/communication/nccl-all-gather
+- image: public.ecr.aws/hpc-cloud/nccl-tests:cuda12.8.1-efa1.43.2-ofiv1.16.3-ncclv2.27.7-1-testsv2.16.9
+  kind: workload
+  source: catalog/communication/nccl-all-gather
+- image: public.ecr.aws/hpc-cloud/nccl-tests:latest
+  kind: workload
+  source: catalog/communication/nccl-all-gather
+- image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.8
+  kind: workload
+  source: catalog/communication/nccl-all-gather
+- image: public.ecr.aws/docker/library/golang:1.27.0-trixie
+  kind: build
+  source: Dockerfile (controller build base)
+- image: nvcr.io/nvidia/distroless/static:v4.1.1@sha256:93868cd1433d959d75a4399ffa56ba452795a6c9373018c8e2a758c372eb0ffc
+  kind: build
+  source: Dockerfile (controller build base)

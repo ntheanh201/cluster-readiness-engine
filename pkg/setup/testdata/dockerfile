@@ -1,0 +1,6 @@
+// Embedded snapshot of the repo Dockerfile (only the FROM lines matter) so
+// the air-gap image manifest can report the controller build base images
+// without filesystem access. Kept in sync with the real Dockerfile by the
+// TestManifestCoversRepoImageReferences completeness test.
+FROM public.ecr.aws/docker/library/golang:1.27.0-trixie AS builder
+FROM nvcr.io/nvidia/distroless/static:v4.1.1@sha256:93868cd1433d959d75a4399ffa56ba452795a6c9373018c8e2a758c372eb0ffc
